@@ -48,7 +48,7 @@ fn main()
             SpatialVec([-1.2, 1.0]),
             //&step_predicate,
             &grad_predicate,
-            &|x: SpatialVec<2>| -1.0*RosenDerivatives::gen_grad(&derivs, x),
+            &|x: SpatialVec<2>| -RosenDerivatives::gen_grad(&derivs, x),
         ),
         &func,
     );
@@ -61,7 +61,7 @@ fn main()
             SpatialVec([-1.2, 1.0]),
             //&step_predicate,
             &grad_predicate,
-            &|x: SpatialVec<2>| -1.0*RosenDerivatives::gen_newton(&derivs, x),
+            &|x: SpatialVec<2>| -RosenDerivatives::gen_newton(&derivs, x),
         ),
         &func,
     );

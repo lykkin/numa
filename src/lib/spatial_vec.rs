@@ -1,4 +1,4 @@
-use std::{ops::{SubAssign, AddAssign, Add, Mul, Sub, Index, IndexMut}, slice::SliceIndex};
+use std::{ops::{Neg, SubAssign, AddAssign, Add, Mul, Sub, Index, IndexMut}, slice::SliceIndex};
 use std::fmt;
 
 // TODO: come up with a better name, it isn't really a spatial vector just had to avoid name collision
@@ -22,6 +22,15 @@ impl<const SIZE: usize> SpatialVec<{SIZE}> {
         res.powf(0.5)
     }
 }
+
+impl<const SIZE: usize> Neg for SpatialVec<{SIZE}> {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        -1.0 * self
+    }
+}
+
 
 impl<const SIZE: usize> fmt::Display for SpatialVec<{SIZE}> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
