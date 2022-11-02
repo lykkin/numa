@@ -3,9 +3,9 @@ use crate::lib::rosen::RosenDerivatives;
 
 use super::tracer::Tracer;
 #[derive(Clone, Copy)]
-pub struct DescentPredicateData
+pub struct DescentFrame
 {
-    pub steps: usize,
+    pub step: usize,
     pub grad: SpatialVec<2>,
     pub position: SpatialVec<2>,
     pub value: f64
@@ -25,9 +25,8 @@ pub struct Optimizer<'a>
 
 impl Optimizer<'_>
 {
-    fn calc_next_step_length(self: &mut Self, trial_name: &str, start:SpatialVec<2>, step_direction: SpatialVec<2>) -> f64 {
+    fn calc_next_step_length(self: &mut Self, trial_name: &str, start:SpatialVec<2>, step_direction: SpatialVec<2>, start_value: f64) -> f64 {
         let objective = self.objective;
-        let start_value = objective(start);
         let grad = self.derivs.gen_grad(start);
         let candidate_dot = self.step_threshold_coefficient * step_direction.dot(grad);
 
@@ -39,36 +38,38 @@ impl Optimizer<'_>
             num_loops += 1;
         }
         self.tracer.increment_call(trial_name.to_owned() + "/grad", 1);
-        self.tracer.increment_call(trial_name.to_owned() + "/objective", num_loops + 2);
+        self.tracer.increment_call(trial_name.to_owned() + "/objective", num_loops + 1);
         step_size
     }
 
-    pub fn descent(self: &mut Self, trial_name: &str, start: SpatialVec<2>, should_step: &dyn Fn(DescentPredicateData) -> bool, direction_gen: &dyn Fn(SpatialVec<2>) -> SpatialVec<2>) -> Vec<SpatialVec<2>> {
+    pub fn descent(self: &mut Self, trial_name: String, start: SpatialVec<2>, should_step: &dyn Fn(DescentFrame) -> bool, direction_gen: &dyn Fn(SpatialVec<2>) -> SpatialVec<2>) -> Vec<DescentFrame> {
         let objective = self.objective;
 
-        let mut res: Vec<SpatialVec<2>> = vec![];
         let mut curr_step = start;
-        let mut pred_data = DescentPredicateData {
-            grad: self.derivs.gen_grad(curr_step),
-            steps: 0,
-            position: curr_step,
-            value: objective(curr_step),
-        };
+        let mut res: Vec<DescentFrame> = vec![
+            DescentFrame {
+                grad: self.derivs.gen_grad(curr_step),
+                step: 0,
+                position: curr_step,
+                value: objective(curr_step),
+            }
+        ];
 
-        while should_step(pred_data) {
-            res.push(SpatialVec::clone(&curr_step));
-
+        let mut last_frame = res[0];
+        while should_step(last_frame) {
             let step_direction = direction_gen(curr_step);
-            let step_length = Optimizer::calc_next_step_length(self, trial_name, curr_step, step_direction);
+            let step_length = Optimizer::calc_next_step_length(self, trial_name.as_ref(), curr_step, step_direction, last_frame.value);
 
-            curr_step += (step_length * step_direction);
+            curr_step += step_length * step_direction;
+            last_frame = DescentFrame {
+                grad: self.derivs.gen_grad(curr_step),
+                step: res.len(),
+                position: curr_step,
+                value: objective(curr_step),
+            };
 
-            pred_data.grad = self.derivs.gen_grad(curr_step);
-            pred_data.steps += 1;
-            pred_data.position = curr_step;
-            pred_data.value = objective(curr_step);
+            res.push(last_frame);
         }
-        res.push(curr_step);
         self.tracer.increment_call(trial_name.to_owned() + "/grad", res.len());
         self.tracer.increment_call(trial_name.to_owned() + "/objective", res.len());
         res
