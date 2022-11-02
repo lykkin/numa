@@ -28,7 +28,7 @@ impl RosenDerivatives
     {
         let grad = RosenDerivatives::gen_grad(self, x);
 
-        let a = self.rosen_coefficient*-4.0 * x[1] + 1200.0 * x[0].powi(2) + 2.0;
+        let a = self.rosen_coefficient*-4.0 * x[1] + 12.0 * self.rosen_coefficient * x[0].powi(2) + 2.0;
         let b = self.rosen_coefficient*-4.0 * x[0];
         let c = b;
         let d = self.rosen_coefficient*2.0;
