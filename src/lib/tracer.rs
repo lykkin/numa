@@ -11,6 +11,15 @@ impl Tracer {
             calls: HashMap::new()
         }
     }
+
+    pub fn merge(self: &mut Self, other: &Self) {
+        // TODO: make this more performant
+        for (name, increment) in other.calls.clone() {
+            println!("{}, {}", name, increment);
+            self.increment_call(name, increment);
+        }
+    }
+
     pub fn increment_call(self: &mut Self, name: String, increment: usize) {
         self.calls
             .entry(name)

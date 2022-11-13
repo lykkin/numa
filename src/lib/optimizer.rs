@@ -42,6 +42,39 @@ impl Optimizer<'_>
         step_size
     }
 
+    pub fn descent_mut(self: &mut Self, trial_name: String, start: SpatialVec<2>, should_step: &dyn Fn(DescentFrame) -> bool, direction_gen: &mut dyn FnMut(SpatialVec<2>) -> SpatialVec<2>) -> Vec<DescentFrame> {
+        let objective = self.objective;
+
+        let mut curr_step = start;
+        let mut res: Vec<DescentFrame> = vec![
+            DescentFrame {
+                grad: self.derivs.gen_grad(curr_step),
+                step: 0,
+                position: curr_step,
+                value: objective(curr_step),
+            }
+        ];
+
+        let mut last_frame = res[0];
+        while should_step(last_frame) {
+            let step_direction = direction_gen(curr_step);
+            let step_length = Optimizer::calc_next_step_length(self, trial_name.as_ref(), curr_step, step_direction, last_frame.value);
+
+            curr_step += step_length * step_direction;
+            last_frame = DescentFrame {
+                grad: self.derivs.gen_grad(curr_step),
+                step: res.len(),
+                position: curr_step,
+                value: objective(curr_step),
+            };
+
+            res.push(last_frame);
+        }
+        self.tracer.increment_call(trial_name.to_owned() + "/grad", res.len());
+        self.tracer.increment_call(trial_name.to_owned() + "/objective", res.len());
+        res
+    }
+
     pub fn descent(self: &mut Self, trial_name: String, start: SpatialVec<2>, should_step: &dyn Fn(DescentFrame) -> bool, direction_gen: &dyn Fn(SpatialVec<2>) -> SpatialVec<2>) -> Vec<DescentFrame> {
         let objective = self.objective;
 
