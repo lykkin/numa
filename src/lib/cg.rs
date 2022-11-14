@@ -4,6 +4,7 @@ use super::tracer::Tracer;
 
 //TODO: generic dimensions
 //TODO: scope down on access, add a constructor
+//TODO: implement a shared interface
 pub struct CG<'a> {
     pub current_direction: SpatialVec<2>,
     pub current_location: SpatialVec<2>,
@@ -21,7 +22,7 @@ impl CG<'_> {
 
         self.current_direction = -next_grad + beta * self.current_direction;
 
-        println!("{}", next_grad.dot(self.current_direction));
+        //println!("{}", beta);
         if next_grad.dot(self.current_direction) >= 0.0 {
             self.current_direction = -next_grad;
             self.tracer.increment_call(
