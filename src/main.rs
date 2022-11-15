@@ -45,11 +45,16 @@ fn generate_artifacts(trial_results: &mut HashMap<String, Vec<DescentFrame>>, tr
         let rosen_coefficient = cap["coeff"].parse::<f64>().unwrap();
         let alg = &cap["alg"];
         let num_evals = tracer.calls.get(&format!("{}/objective", trial_name)).unwrap();
+        let num_restarts:usize;
+        match tracer.calls.get(&format!("{}/reset_direction", trial_name)) {
+            None => num_restarts = 0,
+            Some(v) => num_restarts = *v,
+        }
 
         let trial_key = &format!("{}-{}", alg, rosen_coefficient);
 
-        // TODO: break this out into a matlab specific formatter
-        println!("{}: ${}$ & ${}$ & ${}$", trial_key, frames.last().unwrap().value, frames.len() - 1, num_evals);
+        // TODO: break this out into a latex specific formatter
+        println!("{}: ${}$ & ${}$ & ${}$ & ${}$", trial_key, frames.last().unwrap().value, frames.len() - 1, num_evals, num_restarts);
 
         // value graphing
         let mut grad_curve = Curve::new();
@@ -70,10 +75,16 @@ fn generate_artifacts(trial_results: &mut HashMap<String, Vec<DescentFrame>>, tr
 
         // add curve to plot
         let mut grad_plot = Plot::new();
-        grad_plot.add(&grad_curve).grid_and_labels("Iteration", "Grad Norm");
+        grad_plot
+            .add(&grad_curve)
+            .set_log_y(true)
+            .grid_and_labels("Iteration", "Grad Norm");
 
         let mut objective_plot = Plot::new();
-        objective_plot.add(&objective_curve).grid_and_labels("Iteration", "Objective Value");
+        objective_plot
+            .add(&objective_curve)
+            .set_log_y(true)
+            .grid_and_labels("Iteration", "Objective Value");
 
         grad_plot.save(&format!("./figs/{}/{0}-Grad-plot", trial_key));
         objective_plot.save(&format!("./figs/{}/{0}-objective-plot", trial_key));

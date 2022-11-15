@@ -18,10 +18,13 @@ impl CG<'_> {
         let curr_grad = self.derivs.gen_grad(self.current_location);
         let next_grad = self.derivs.gen_grad(x);
 
+        // calculate scaling factor for the correcting factor
         let beta = (next_grad.dot(next_grad))/(curr_grad.dot(curr_grad));
 
+        // calculate new direction by removing some of the previous direction from the current steepest descent direction
         self.current_direction = -next_grad + beta * self.current_direction;
 
+        // reset to grad if we are no longer on a descent direction
         if next_grad.dot(self.current_direction) >= 0.0 {
             self.current_direction = -next_grad;
             self.tracer.increment_call(
