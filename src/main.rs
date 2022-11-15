@@ -1,14 +1,15 @@
 mod lib;
 
-use plotpy::{Plot, Curve, Contour, PolyCode, Canvas, AsMatrix};
+use plotpy::{Plot, Curve, Contour, Canvas, AsMatrix};
 use russell_lab::generate3d;
 use regex::Regex;
 
 use std::collections::HashMap;
 
 use crate::lib::spatial_vec::SpatialVec;
+use crate::lib::cg::CG;
 use crate::lib::optimizer::{Optimizer, DescentFrame};
-use crate::lib::rosen::{RosenDerivatives, self};
+use crate::lib::rosen::RosenDerivatives;
 use crate::lib::tracer::Tracer;
 
 fn gen_table(frames: Vec<DescentFrame>)
@@ -44,12 +45,16 @@ fn generate_artifacts(trial_results: &mut HashMap<String, Vec<DescentFrame>>, tr
         let rosen_coefficient = cap["coeff"].parse::<f64>().unwrap();
         let alg = &cap["alg"];
         let num_evals = tracer.calls.get(&format!("{}/objective", trial_name)).unwrap();
+        let num_restarts:usize;
+        match tracer.calls.get(&format!("{}/reset_direction", trial_name)) {
+            None => num_restarts = 0,
+            Some(v) => num_restarts = *v,
+        }
 
         let trial_key = &format!("{}-{}", alg, rosen_coefficient);
 
-        // TODO: break this out into a matlab specific formatter
-        println!("{}: ${}$ & ${}$ & ${}$", trial_key, frames.last().unwrap().value, frames.len() - 1, num_evals);
-
+        // TODO: break this out into a latex specific formatter
+        println!("{}: ${}$ & ${}$ & ${}$ & ${}$", trial_key, frames.last().unwrap().value, frames.len() - 1, num_evals, num_restarts);
 
         // value graphing
         let mut grad_curve = Curve::new();
@@ -70,10 +75,16 @@ fn generate_artifacts(trial_results: &mut HashMap<String, Vec<DescentFrame>>, tr
 
         // add curve to plot
         let mut grad_plot = Plot::new();
-        grad_plot.add(&grad_curve).grid_and_labels("Iteration", "Grad Norm");
+        grad_plot
+            .add(&grad_curve)
+            .set_log_y(true)
+            .grid_and_labels("Iteration", "Grad Norm");
 
         let mut objective_plot = Plot::new();
-        objective_plot.add(&objective_curve).grid_and_labels("Iteration", "Objective Value");
+        objective_plot
+            .add(&objective_curve)
+            .set_log_y(true)
+            .grid_and_labels("Iteration", "Objective Value");
 
         grad_plot.save(&format!("./figs/{}/{0}-Grad-plot", trial_key));
         objective_plot.save(&format!("./figs/{}/{0}-objective-plot", trial_key));
@@ -112,16 +123,20 @@ fn generate_artifacts(trial_results: &mut HashMap<String, Vec<DescentFrame>>, tr
     }
 
 }
-
 fn main()
 {
     let tracer= &mut Tracer::new();
     let rosen_coefficients = [1.0, 100.0];
 
     let trial_results: &mut HashMap<String, Vec<DescentFrame>> = &mut HashMap::new();
+    let start = SpatialVec([-1.2, 1.0]);
+    //let start = SpatialVec([5.0, 5.0]);
 
     for rosen_coefficient in rosen_coefficients {
-        let func = move |x: SpatialVec<2>| rosen_coefficient * (x[1] - x[0].powi(2)).powi(2) + (1.0 - x[0]).powi(2);
+        let func = |x: SpatialVec<2>| {
+            let rosen_coefficient = rosen_coefficient;
+            rosen_coefficient * (x[1] - x[0].powi(2)).powi(2) + (1.0 - x[0]).powi(2)
+        };
         let derivs = RosenDerivatives::new(rosen_coefficient);
 
         let optimizer = &mut Optimizer {
@@ -136,24 +151,53 @@ fn main()
         let grad_predicate = move |data: DescentFrame| data.grad.norm() > 1.0e-3;
 
         let grad_trial_name = format!("Grad_Descent/{}", rosen_coefficient);
-        trial_results.insert(grad_trial_name.clone(), Optimizer::descent(
+        trial_results.insert(
+          grad_trial_name.clone(),
+          Optimizer::descent(
                 optimizer,
                 grad_trial_name,
-                SpatialVec([-1.2, 1.0]),
+                start.clone(),
                 &grad_predicate,
-                &|x: SpatialVec<2>| -RosenDerivatives::gen_grad(&derivs, x),
+                &mut |x: SpatialVec<2>| -RosenDerivatives::gen_grad(&derivs, x),
             )
         );
 
         let newton_trial_name = format!("Newton_Iteration/{}", rosen_coefficient);
-        trial_results.insert(newton_trial_name.clone(), Optimizer::descent(
+        trial_results.insert(
+          newton_trial_name.clone(),
+          Optimizer::descent(
                 optimizer,
                 newton_trial_name,
-                SpatialVec([-1.2, 1.0]),
+                start.clone(),
                 &grad_predicate,
-                &|x: SpatialVec<2>| -RosenDerivatives::gen_newton(&derivs, x),
+                &mut |x: SpatialVec<2>| -RosenDerivatives::gen_newton(&derivs, x),
             )
         );
+
+        let cg_trial_name = format!("CG_iteration/{}", rosen_coefficient);
+        let cg_tracer= &mut Tracer::new();
+        // TODO: move the direction gen strategy into the optimizer
+        let cg = &mut CG {
+            current_direction: SpatialVec([0.0, 0.0]),
+            current_location: start.clone(),
+            derivs,
+            trial_name: cg_trial_name.clone(),
+            tracer: cg_tracer,
+        };
+
+        trial_results.insert(
+            cg_trial_name.clone(),
+            Optimizer::descent(
+                optimizer,
+                cg_trial_name,
+                start.clone(),
+                &grad_predicate,
+                &mut |x: SpatialVec<2>| {
+                    cg.gen_direction(x)
+                }
+            )
+        );
+        tracer.merge(cg.tracer);
     }
 
     generate_artifacts(trial_results, tracer);
