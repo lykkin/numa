@@ -51,7 +51,6 @@ fn generate_artifacts(trial_results: &mut HashMap<String, Vec<DescentFrame>>, tr
         // TODO: break this out into a matlab specific formatter
         println!("{}: ${}$ & ${}$ & ${}$", trial_key, frames.last().unwrap().value, frames.len() - 1, num_evals);
 
-
         // value graphing
         let mut grad_curve = Curve::new();
         let mut objective_curve = Curve::new();
@@ -119,8 +118,8 @@ fn main()
     let rosen_coefficients = [1.0, 100.0];
 
     let trial_results: &mut HashMap<String, Vec<DescentFrame>> = &mut HashMap::new();
-    //let start = SpatialVec([-1.2, 1.0]);
-    let start = SpatialVec([5.0, 5.0]);
+    let start = SpatialVec([-1.2, 1.0]);
+    //let start = SpatialVec([5.0, 5.0]);
 
     for rosen_coefficient in rosen_coefficients {
         let func = |x: SpatialVec<2>| {
@@ -148,7 +147,7 @@ fn main()
                 grad_trial_name,
                 start.clone(),
                 &grad_predicate,
-                &|x: SpatialVec<2>| -RosenDerivatives::gen_grad(&derivs, x),
+                &mut |x: SpatialVec<2>| -RosenDerivatives::gen_grad(&derivs, x),
             )
         );
 
@@ -160,7 +159,7 @@ fn main()
                 newton_trial_name,
                 start.clone(),
                 &grad_predicate,
-                &|x: SpatialVec<2>| -RosenDerivatives::gen_newton(&derivs, x),
+                &mut |x: SpatialVec<2>| -RosenDerivatives::gen_newton(&derivs, x),
             )
         );
 
@@ -177,7 +176,7 @@ fn main()
 
         trial_results.insert(
             cg_trial_name.clone(),
-            Optimizer::descent_mut(
+            Optimizer::descent(
                 optimizer,
                 cg_trial_name,
                 start.clone(),
