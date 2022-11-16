@@ -32,6 +32,10 @@ impl CG<'_> {
                 1
             );
         }
+
+        // update current location
+        self.current_location = x;
+
         self.tracer.increment_call(self.trial_name.to_owned() + "/grad", 2);
         self.current_direction
     }
