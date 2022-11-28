@@ -12,7 +12,7 @@ use crate::lib::optimizer::{Optimizer, DescentFrame};
 use crate::lib::rosen::RosenDerivatives;
 use crate::lib::tracer::Tracer;
 
-fn gen_table(frames: Vec<DescentFrame>)
+fn gen_table<const SIZE: usize> (frames: Vec<DescentFrame<SIZE>>)
 { 
     for i in 0..frames.len() {
         let step = frames.get(i);
@@ -23,9 +23,9 @@ fn gen_table(frames: Vec<DescentFrame>)
     }
 }
 
-struct FakeMatrix(Vec<SpatialVec<2>>);
+struct FakeMatrix<const SIZE: usize>(Vec<SpatialVec<SIZE>>);
 
-impl<'a> AsMatrix<'a, f64> for FakeMatrix {
+impl<'a, const SIZE: usize> AsMatrix<'a, f64> for FakeMatrix<SIZE> {
     fn at(&self, i: usize, j: usize) -> f64 {
         let FakeMatrix(v) = self;
         v[i][j]
@@ -36,7 +36,7 @@ impl<'a> AsMatrix<'a, f64> for FakeMatrix {
     }
 }
 
-fn generate_artifacts(trial_results: &mut HashMap<String, Vec<DescentFrame>>, tracer: &mut Tracer) {
+fn generate_artifacts<const SIZE: usize>(trial_results: &mut HashMap<String, Vec<DescentFrame<SIZE>>>, tracer: &mut Tracer) {
     let re = Regex::new(r"^(?P<alg>(.*))/(?P<coeff>.*)$").unwrap();
 
     let n = 200;
@@ -128,7 +128,7 @@ fn main()
     let tracer= &mut Tracer::new();
     let rosen_coefficients = [1.0, 100.0];
 
-    let trial_results: &mut HashMap<String, Vec<DescentFrame>> = &mut HashMap::new();
+    let trial_results: &mut HashMap<String, Vec<DescentFrame<2>>> = &mut HashMap::new();
     let start = SpatialVec([-1.2, 1.0]);
     //let start = SpatialVec([5.0, 5.0]);
 
@@ -137,7 +137,32 @@ fn main()
             let rosen_coefficient = rosen_coefficient;
             rosen_coefficient * (x[1] - x[0].powi(2)).powi(2) + (1.0 - x[0]).powi(2)
         };
-        let derivs = RosenDerivatives::new(rosen_coefficient);
+        let grad = &|x: SpatialVec<2>| -> SpatialVec<2> {
+            SpatialVec([
+                rosen_coefficient*-4.0*x[0] * (x[1] - x[0].powi(2)) - 2.0*(1.0  - x[0]),
+                rosen_coefficient*2.0 * (x[1] - x[0].powi(2)),
+            ])
+        };
+        let newton = &|x: SpatialVec<2>| -> SpatialVec<2> {
+           let grad = grad(x);
+
+           let a = rosen_coefficient*-4.0 * x[1] + 12.0 * rosen_coefficient * x[0].powi(2) + 2.0;
+           let b = rosen_coefficient*-4.0 * x[0];
+           let c = b;
+           let d = rosen_coefficient*2.0;
+
+           let scale = 1.0/(a*d - b*c);
+
+           SpatialVec([
+               scale * (d*grad[0] - b*grad[1]),
+               scale * (a*grad[1] - c*grad[0]),
+           ])
+        };
+        let derivs = RosenDerivatives {
+            rosen_coefficient,
+            grad,
+            newton
+        };
 
         let optimizer = &mut Optimizer {
             initial_step_length: 1.0,
@@ -148,7 +173,7 @@ fn main()
             tracer
         };
 
-        let grad_predicate = move |data: DescentFrame| data.grad.norm() > 1.0e-3;
+        let grad_predicate = move |data: DescentFrame<2>| data.grad.norm() > 1.0e-3;
 
         let grad_trial_name = format!("Grad_Descent/{}", rosen_coefficient);
         trial_results.insert(

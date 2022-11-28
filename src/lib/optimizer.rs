@@ -3,29 +3,29 @@ use crate::lib::rosen::RosenDerivatives;
 
 use super::tracer::Tracer;
 #[derive(Clone, Copy)]
-pub struct DescentFrame
+pub struct DescentFrame<const SIZE: usize>
 {
     pub step: usize,
-    pub grad: SpatialVec<2>,
-    pub position: SpatialVec<2>,
+    pub grad: SpatialVec<SIZE>,
+    pub position: SpatialVec<SIZE>,
     pub value: f64
 }
 
 // TODO: break this into its own file with some tests
 // TODO: make the dimension generic
-pub struct Optimizer<'a>
+pub struct Optimizer<'a, const SIZE: usize>
 {
     pub initial_step_length: f64,
     pub step_contraction_factor: f64,
     pub step_threshold_coefficient: f64,
-    pub objective: &'a dyn Fn(SpatialVec<2>) -> f64,
-    pub derivs: RosenDerivatives,
+    pub objective: &'a dyn Fn(SpatialVec<SIZE>) -> f64,
+    pub derivs: RosenDerivatives<'a, SIZE>,
     pub tracer: &'a mut Tracer
 }
 
-impl Optimizer<'_>
+impl<const SIZE: usize> Optimizer<'_, SIZE>
 {
-    fn calc_next_step_length(self: &mut Self, trial_name: &str, start:SpatialVec<2>, step_direction: SpatialVec<2>, start_value: f64) -> (f64, f64) {
+    fn calc_next_step_length(self: &mut Self, trial_name: &str, start:SpatialVec<SIZE>, step_direction: SpatialVec<SIZE>, start_value: f64) -> (f64, f64) {
         let objective = self.objective;
         let grad = self.derivs.gen_grad(start);
         let candidate_dot = self.step_threshold_coefficient * step_direction.dot(grad);
@@ -42,11 +42,11 @@ impl Optimizer<'_>
         (step_size, next_value)
     }
 
-    pub fn descent(self: &mut Self, trial_name: String, start: SpatialVec<2>, should_step: &dyn Fn(DescentFrame) -> bool, direction_gen: &mut dyn FnMut(SpatialVec<2>) -> SpatialVec<2>) -> Vec<DescentFrame> {
+    pub fn descent(self: &mut Self, trial_name: String, start: SpatialVec<SIZE>, should_step: &dyn Fn(DescentFrame<SIZE>) -> bool, direction_gen: &mut dyn FnMut(SpatialVec<SIZE>) -> SpatialVec<SIZE>) -> Vec<DescentFrame<SIZE>> {
         let objective = self.objective;
 
         let mut curr_step = start;
-        let mut res: Vec<DescentFrame> = vec![
+        let mut res: Vec<DescentFrame<SIZE>> = vec![
             DescentFrame {
                 grad: self.derivs.gen_grad(curr_step),
                 step: 0,

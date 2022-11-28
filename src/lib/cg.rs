@@ -5,16 +5,16 @@ use super::tracer::Tracer;
 //TODO: generic dimensions
 //TODO: scope down on access, add a constructor
 //TODO: implement a shared interface
-pub struct CG<'a> {
-    pub current_direction: SpatialVec<2>,
-    pub current_location: SpatialVec<2>,
-    pub derivs: RosenDerivatives,
+pub struct CG<'a, const SIZE: usize> {
+    pub current_direction: SpatialVec<SIZE>,
+    pub current_location: SpatialVec<SIZE>,
+    pub derivs: RosenDerivatives<'a, SIZE>,
     pub trial_name: String,
     pub tracer: &'a mut Tracer
 }
 
-impl CG<'_> {
-    pub fn gen_direction(&mut self, x: SpatialVec<2>) -> SpatialVec<2> {
+impl<const SIZE: usize> CG<'_, SIZE> {
+    pub fn gen_direction(&mut self, x: SpatialVec<SIZE>) -> SpatialVec<SIZE> {
         let curr_grad = self.derivs.gen_grad(self.current_location);
         let next_grad = self.derivs.gen_grad(x);
 
