@@ -1,230 +1,122 @@
 mod lib;
 
-use plotpy::{Plot, Curve, Contour, Canvas, AsMatrix};
-use russell_lab::generate3d;
-use regex::Regex;
+use image::{GrayImage, Luma};
 
-use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufReader, BufRead};
 
 use crate::lib::spatial_vec::SpatialVec;
-use crate::lib::cg::CG;
-use crate::lib::optimizer::{Optimizer, DescentFrame};
-use crate::lib::rosen::RosenDerivatives;
-use crate::lib::tracer::Tracer;
+use crate::lib::cg::{CG, DescentFrame};
+use crate::lib::matrix::Matrix;
 
-fn gen_table<const SIZE: usize> (frames: Vec<DescentFrame<SIZE>>)
-{ 
-    for i in 0..frames.len() {
-        let step = frames.get(i);
-        match step {
-            Some(frame) => println!("step {}: f{} = {:?}", i, frame.position, frame.value),
-            None => println!("oops"),
+fn gen_matrix<const D: usize>(L: f64) -> Matrix<D>{
+    let mut res = [SpatialVec([0.0; D]); D];
+    for i in 0..D {
+        res[i][i] = 1.0 - 2.0*L;
+        if i < D-1 {
+            res[i + 1][i] = L;
+            res[i][i + 1] = L;
         }
     }
+    Matrix(res)
 }
 
-struct FakeMatrix<const SIZE: usize>(Vec<SpatialVec<SIZE>>);
+fn tikhonov<const SIZE: usize>(A: Matrix<SIZE>, D: &Vec<SpatialVec<SIZE>>, lambda: f64) -> Vec<SpatialVec<SIZE>> {
+    let At = A.transpose();
+    let AAt = A*At;
+    let reg_mat = AAt + lambda*lambda*Matrix::identity();
 
-impl<'a, const SIZE: usize> AsMatrix<'a, f64> for FakeMatrix<SIZE> {
-    fn at(&self, i: usize, j: usize) -> f64 {
-        let FakeMatrix(v) = self;
-        v[i][j]
+    let mut out: Vec<SpatialVec<SIZE>> = Vec::with_capacity(D.len());
+    let mut start: SpatialVec<SIZE> = D[0];
+    for i in 0..D.len() {
+        let d = D[i];
+        let Atd = At*d;
+
+        let residual_predicate = |data: DescentFrame<SIZE>| data.residual.norm() > 1.0e-6;
+
+        // TODO: move the direction gen strategy into the optimizer
+        let resid = reg_mat*start - Atd;
+        let cg = &mut CG {
+            direction: -resid,
+            location: start,
+            residual: resid,
+        };
+
+        let res = cg.descent(
+            &residual_predicate,
+            reg_mat,
+        );
+
+        let unblurred = res.last().unwrap().position;
+        start = unblurred;
+        out.push(unblurred);
+        println!("step:{} steps:{}", out.len(), res.len());
     }
-    fn size(&self) -> (usize, usize) {
-        let FakeMatrix(v) = self;
-        (v.len(), 2)
-    }
+    out
 }
 
-fn generate_artifacts<const SIZE: usize>(trial_results: &mut HashMap<String, Vec<DescentFrame<SIZE>>>, tracer: &mut Tracer) {
-    let re = Regex::new(r"^(?P<alg>(.*))/(?P<coeff>.*)$").unwrap();
-
-    let n = 200;
-    for (trial_name, frames) in trial_results {
-        let cap = re.captures(trial_name).unwrap();
-        let rosen_coefficient = cap["coeff"].parse::<f64>().unwrap();
-        let alg = &cap["alg"];
-        let num_evals = tracer.calls.get(&format!("{}/objective", trial_name)).unwrap();
-        let num_restarts:usize;
-        match tracer.calls.get(&format!("{}/reset_direction", trial_name)) {
-            None => num_restarts = 0,
-            Some(v) => num_restarts = *v,
-        }
-
-        let trial_key = &format!("{}-{}", alg, rosen_coefficient);
-
-        // TODO: break this out into a latex specific formatter
-        println!("{}: ${}$ & ${}$ & ${}$ & ${}$", trial_key, frames.last().unwrap().value, frames.len() - 1, num_evals, num_restarts);
-
-        // value graphing
-        let mut grad_curve = Curve::new();
-        let mut objective_curve = Curve::new();
-        grad_curve.set_line_width(2.0);
-        objective_curve.set_line_width(2.0);
-
-        // add points
-        grad_curve.points_begin();
-        objective_curve.points_begin();
-        for i in 0..frames.len() {
-            let frame = frames[i];
-            grad_curve.points_add(i as f64, frame.grad.norm());
-            objective_curve.points_add(i as f64, frame.value);
-        }
-        grad_curve.points_end();
-        objective_curve.points_end();
-
-        // add curve to plot
-        let mut grad_plot = Plot::new();
-        grad_plot
-            .add(&grad_curve)
-            .set_log_y(true)
-            .grid_and_labels("Iteration", "Grad Norm");
-
-        let mut objective_plot = Plot::new();
-        objective_plot
-            .add(&objective_curve)
-            .set_log_y(true)
-            .grid_and_labels("Iteration", "Objective Value");
-
-        grad_plot.save(&format!("./figs/{}/{0}-Grad-plot", trial_key));
-        objective_plot.save(&format!("./figs/{}/{0}-objective-plot", trial_key));
-
-        // path graphing
-        let func = move |x: SpatialVec<2>| rosen_coefficient * (x[1] - x[0].powi(2)).powi(2) + (1.0 - x[0]).powi(2);
-        let (x, y, z) = generate3d(-2.0, 2.0, -2.0, 2.0, n, n, |x1, x2| func(SpatialVec([x1, x2])));
-        let mut contour = Contour::new();
-        contour
-            .set_colorbar_label("cost")
-            .set_colormap_name("terrain")
-            .set_selected_line_color("#f1eb67")
-            .set_selected_line_width(12.0)
-            .set_selected_level(0.0, true);
-
-        // draw contour
-        contour.draw(&x, &y, &z);
-
-        let mut canvas = Canvas::new();
-        canvas.set_face_color("None").set_edge_color("red");
-
-        let mut points = vec![];
-        for pos in frames.iter().map(|frame| frame.position) {
-            points.push(pos);
-        }
-        canvas.draw_polyline(&FakeMatrix(points), false);
-
-        // add contour to plot
-        let mut plot = Plot::new();
-        plot.add(&contour)
-            .add(&canvas)
-            .set_labels("x1", "x2");
-
-        // save figure
-        plot.save(&format!("./figs/{}/{0}-path", trial_key));
-    }
-
-}
 fn main()
 {
-    let tracer= &mut Tracer::new();
-    let rosen_coefficients = [1.0, 100.0];
+    // load image data and arrange into vectors
+    let file = File::open("./data/dollarblur.txt").unwrap();
+    let reader = BufReader::new(file);
+    let mut input_buffer = [[0.0; 220]; 520];
 
-    let trial_results: &mut HashMap<String, Vec<DescentFrame<2>>> = &mut HashMap::new();
-    let start = SpatialVec([-1.2, 1.0]);
-    //let start = SpatialVec([5.0, 5.0]);
-
-    for rosen_coefficient in rosen_coefficients {
-        let func = |x: SpatialVec<2>| {
-            let rosen_coefficient = rosen_coefficient;
-            rosen_coefficient * (x[1] - x[0].powi(2)).powi(2) + (1.0 - x[0]).powi(2)
-        };
-        let grad = &|x: SpatialVec<2>| -> SpatialVec<2> {
-            SpatialVec([
-                rosen_coefficient*-4.0*x[0] * (x[1] - x[0].powi(2)) - 2.0*(1.0  - x[0]),
-                rosen_coefficient*2.0 * (x[1] - x[0].powi(2)),
-            ])
-        };
-        let newton = &|x: SpatialVec<2>| -> SpatialVec<2> {
-           let grad = grad(x);
-
-           let a = rosen_coefficient*-4.0 * x[1] + 12.0 * rosen_coefficient * x[0].powi(2) + 2.0;
-           let b = rosen_coefficient*-4.0 * x[0];
-           let c = b;
-           let d = rosen_coefficient*2.0;
-
-           let scale = 1.0/(a*d - b*c);
-
-           SpatialVec([
-               scale * (d*grad[0] - b*grad[1]),
-               scale * (a*grad[1] - c*grad[0]),
-           ])
-        };
-        let derivs = RosenDerivatives {
-            rosen_coefficient,
-            grad,
-            newton
-        };
-
-        let optimizer = &mut Optimizer {
-            initial_step_length: 1.0,
-            step_contraction_factor: 0.5,
-            step_threshold_coefficient: 0.01,
-            objective: &func,
-            derivs: RosenDerivatives::clone(&derivs),
-            tracer
-        };
-
-        let grad_predicate = move |data: DescentFrame<2>| data.grad.norm() > 1.0e-3;
-
-        let grad_trial_name = format!("Grad_Descent/{}", rosen_coefficient);
-        trial_results.insert(
-          grad_trial_name.clone(),
-          Optimizer::descent(
-                optimizer,
-                grad_trial_name,
-                start.clone(),
-                &grad_predicate,
-                &mut |x: SpatialVec<2>| -RosenDerivatives::gen_grad(&derivs, x),
-            )
-        );
-
-        let newton_trial_name = format!("Newton_Iteration/{}", rosen_coefficient);
-        trial_results.insert(
-          newton_trial_name.clone(),
-          Optimizer::descent(
-                optimizer,
-                newton_trial_name,
-                start.clone(),
-                &grad_predicate,
-                &mut |x: SpatialVec<2>| -RosenDerivatives::gen_newton(&derivs, x),
-            )
-        );
-
-        let cg_trial_name = format!("CG_iteration/{}", rosen_coefficient);
-        let cg_tracer= &mut Tracer::new();
-        // TODO: move the direction gen strategy into the optimizer
-        let cg = &mut CG {
-            current_direction: SpatialVec([0.0, 0.0]),
-            current_location: start.clone(),
-            derivs,
-            trial_name: cg_trial_name.clone(),
-            tracer: cg_tracer,
-        };
-
-        trial_results.insert(
-            cg_trial_name.clone(),
-            Optimizer::descent(
-                optimizer,
-                cg_trial_name,
-                start.clone(),
-                &grad_predicate,
-                &mut |x: SpatialVec<2>| {
-                    cg.gen_direction(x)
-                }
-            )
-        );
-        tracer.merge(cg.tracer);
+    let mut lineNum = 0;
+    for line in reader.lines() {
+        let mut cursor = 0;
+        for val in line.unwrap().split("    ") {
+            if val != "" {
+                input_buffer[cursor][lineNum] = val.trim().parse::<f64>().unwrap();
+                cursor += 1;
+            }
+        }
+        lineNum += 1;
     }
 
-    generate_artifacts(trial_results, tracer);
+    let mut D: Vec<SpatialVec<220>> = Vec::with_capacity(520);
+    for i in 0..520 {
+        D.push(SpatialVec(input_buffer[i]));
+    }
+
+    println!("printing blurred");
+    let mut image = GrayImage::from_raw(520, 220, vec![0u8; 220*520]).unwrap();
+    for y in 0..D.len() {
+        let row = D[y];
+        for x in 0..row.len() {
+            image.put_pixel(y as u32, x as u32, Luma([row[x].round() as u8; 1]));
+        }
+    }
+
+    let res = image.save(format!("./unblur/original.png"));
+    match res {
+        Err(e) => println!("{:?}", e),
+        Ok(()) => println!("ok!")
+    }
+
+    // generate blur matrix
+    let B = gen_matrix::<220>(0.45);
+    let A = B.pow(25);
+
+    let mut lambda = 1.0;
+    while lambda > 0.000001 {
+        let out = tikhonov(A, &D, lambda);
+
+        println!("printing {}", lambda);
+        let mut image = GrayImage::from_raw(520, 220, vec![0u8; 220*520]).unwrap();
+        for y in 0..out.len() {
+            let row = out[y];
+            for x in 0..row.len() {
+                image.put_pixel(y as u32, x as u32, Luma([row[x].round() as u8; 1]));
+            }
+        }
+
+        let res = image.save(format!("./unblur/lambda_{}.png", lambda));
+        match res {
+            Err(e) => println!("{:?}", e),
+            Ok(()) => println!("ok!")
+        }
+        lambda /= 10.0;
+    }
 
 }

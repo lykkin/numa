@@ -19,7 +19,7 @@ pub struct Optimizer<'a, const SIZE: usize>
     pub step_contraction_factor: f64,
     pub step_threshold_coefficient: f64,
     pub objective: &'a dyn Fn(SpatialVec<SIZE>) -> f64,
-    pub derivs: RosenDerivatives<'a, SIZE>,
+    pub gen_grad: &'a dyn Fn(SpatialVec<SIZE>) -> SpatialVec<SIZE>,
     pub tracer: &'a mut Tracer
 }
 
@@ -27,7 +27,7 @@ impl<const SIZE: usize> Optimizer<'_, SIZE>
 {
     fn calc_next_step_length(self: &mut Self, trial_name: &str, start:SpatialVec<SIZE>, step_direction: SpatialVec<SIZE>, start_value: f64) -> (f64, f64) {
         let objective = self.objective;
-        let grad = self.derivs.gen_grad(start);
+        let grad = (self.gen_grad)(start);
         let candidate_dot = self.step_threshold_coefficient * step_direction.dot(grad);
 
         let mut step_size = self.initial_step_length;
@@ -48,7 +48,7 @@ impl<const SIZE: usize> Optimizer<'_, SIZE>
         let mut curr_step = start;
         let mut res: Vec<DescentFrame<SIZE>> = vec![
             DescentFrame {
-                grad: self.derivs.gen_grad(curr_step),
+                grad: (self.gen_grad)(curr_step),
                 step: 0,
                 position: curr_step,
                 value: objective(curr_step),
@@ -62,7 +62,7 @@ impl<const SIZE: usize> Optimizer<'_, SIZE>
 
             curr_step += step_length * step_direction;
             last_frame = DescentFrame {
-                grad: self.derivs.gen_grad(curr_step),
+                grad: (self.gen_grad)(curr_step),
                 step: res.len(),
                 position: curr_step,
                 value: next_value,

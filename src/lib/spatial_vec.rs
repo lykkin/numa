@@ -1,4 +1,4 @@
-use std::{ops::{Neg, SubAssign, AddAssign, Add, Mul, Sub, Index, IndexMut}, slice::SliceIndex};
+use std::{ops::{Neg, SubAssign, AddAssign, Add, Div, Mul, Sub, Index, IndexMut}, slice::SliceIndex};
 use std::fmt;
 
 // TODO: come up with a better name, it isn't really a spatial vector just had to avoid name collision
@@ -13,6 +13,14 @@ impl<const SIZE: usize> SpatialVec<{SIZE}> {
         res
     }
 
+    pub fn len(self) -> usize {
+        SIZE
+    }
+
+    pub fn dot_self(self) -> f64 {
+        self.dot(self)
+    }
+
     pub fn norm(self: &Self) -> f64 {
         let SpatialVec(data) = self;
         let mut res: f64 = 0.0;
@@ -20,6 +28,18 @@ impl<const SIZE: usize> SpatialVec<{SIZE}> {
             res += d*d;
         }
         res.powf(0.5)
+    }
+
+    pub fn from(input: &mut dyn Iterator<Item = &str>) -> Self {
+        let mut res = Self([0.0; SIZE]);
+        let mut cursor = 0;
+        for val in input {
+            if val != "" {
+                res[cursor] = val.trim().parse::<f64>().unwrap();
+                cursor += 1;
+            }
+        }
+        res
     }
 }
 
@@ -129,5 +149,18 @@ where
     fn index_mut(&mut self, i: Idx) -> &mut Self::Output {
         let SpatialVec(data) = self;
         &mut data[i]
+    }
+}
+
+impl<const SIZE: usize> Div<f64> for SpatialVec<{SIZE}> {
+    // The division of rational numbers is a closed operation.
+    type Output = Self;
+
+    fn div(self, rhs: f64) -> Self::Output {
+        let mut out = [0.0; SIZE];
+        for i in 0..SIZE {
+            out[i] = self[i]/rhs;
+        }
+        SpatialVec(out)
     }
 }

@@ -1,42 +1,49 @@
+use super::matrix::Matrix;
 use super::spatial_vec::SpatialVec;
-use super::rosen::RosenDerivatives;
-use super::tracer::Tracer;
+#[derive(Clone, Copy)]
+pub struct DescentFrame<const SIZE: usize>
+{
+    pub residual: SpatialVec<SIZE>,
+    pub position: SpatialVec<SIZE>,
+}
 
 //TODO: generic dimensions
 //TODO: scope down on access, add a constructor
 //TODO: implement a shared interface
-pub struct CG<'a, const SIZE: usize> {
-    pub current_direction: SpatialVec<SIZE>,
-    pub current_location: SpatialVec<SIZE>,
-    pub derivs: RosenDerivatives<'a, SIZE>,
-    pub trial_name: String,
-    pub tracer: &'a mut Tracer
+pub struct CG<const SIZE: usize> {
+    pub direction: SpatialVec<SIZE>,
+    pub location: SpatialVec<SIZE>,
+    pub residual: SpatialVec<SIZE>,
 }
 
-impl<const SIZE: usize> CG<'_, SIZE> {
-    pub fn gen_direction(&mut self, x: SpatialVec<SIZE>) -> SpatialVec<SIZE> {
-        let curr_grad = self.derivs.gen_grad(self.current_location);
-        let next_grad = self.derivs.gen_grad(x);
+impl<const SIZE: usize> CG<SIZE> {
+    pub fn descent(self: &mut Self, should_step: &dyn Fn(DescentFrame<SIZE>) -> bool, A: Matrix<SIZE>) -> Vec<DescentFrame<SIZE>> {
+        let mut res: Vec<DescentFrame<SIZE>> = vec![
+            DescentFrame {
+                residual: self.residual,
+                position: self.location,
+            }
+        ];
 
-        // calculate scaling factor for the correcting factor
-        let beta = (next_grad.dot(next_grad))/(curr_grad.dot(curr_grad));
+        let mut last_frame = res[0];
+        while should_step(last_frame) {
+            let direction_image = A*self.direction;
+            let residual_square = self.residual.dot_self();
 
-        // calculate new direction by removing some of the previous direction from the current steepest descent direction
-        self.current_direction = -next_grad + beta * self.current_direction;
+            let step_length = residual_square/self.direction.dot(direction_image);
 
-        // reset to grad if we are no longer on a descent direction
-        if next_grad.dot(self.current_direction) >= 0.0 {
-            self.current_direction = -next_grad;
-            self.tracer.increment_call(
-                self.trial_name.to_owned() + "/reset_direction",
-                1
-            );
+            self.location += step_length * self.direction;
+            self.residual += step_length * direction_image;
+
+            let beta = self.residual.dot_self()/residual_square;
+            self.direction = -self.residual + beta * self.direction;
+            last_frame = DescentFrame {
+                residual: self.residual,
+                position: self.location,
+            };
+
+            res.push(last_frame);
         }
-
-        // update current location
-        self.current_location = x;
-
-        self.tracer.increment_call(self.trial_name.to_owned() + "/grad", 2);
-        self.current_direction
+        res
     }
 }
